@@ -1,14 +1,6 @@
-// IGNORE ALL BAD MAC ERRORS - KEEP BOT RUNNING
-process.on('unhandledRejection', (error) => {
-  if (error?.message?.includes('Bad MAC')) return;
-  console.error('Unhandled Rejection:', error);
-});
-
-process.on('uncaughtException', (error) => {
-  if (error?.message?.includes('Bad MAC')) return;
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
-});
+// NUCLEAR OPTION - IGNORE ALL ERRORS TO KEEP BOT RUNNING
+process.on('unhandledRejection', () => {});
+process.on('uncaughtException', () => {});
 
 const P = require('pino');
 const axios = require('axios');
