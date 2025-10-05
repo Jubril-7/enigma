@@ -34,15 +34,16 @@ async function connectToWhatsApp() {
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
-        if (qr) {
+        if (qr && !sock.user) {
             console.log('QR Code:', qr);
         }
         if (connection === 'close') {
-            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-                await connectToWhatsApp();
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            if (reason === DisconnectReason.loggedOut) {
+                console.log('Session logged out. Delete auth_info folder and rescan QR.');
             } else {
-                console.log('Connection closed. Please delete auth_info folder and rescan QR.');
-            }
+                console.log('Connection closed. Not reconnecting automatically (Render mode).');
+        }
         } else if (connection === 'open') {
             console.log('Connected to WhatsApp');
             await logMessage('info', 'Connected to WhatsApp');
