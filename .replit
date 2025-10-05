@@ -4,3 +4,5 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
+
+run = "npm start"
