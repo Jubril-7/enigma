@@ -18,6 +18,14 @@ const hangmanCommands = require('./commands/games/hangman');
 const tictactoeCommands = require('./commands/games/tictactoe');
 const wordgameCommands = require('./commands/games/wordgame');
 
+// ✅ ADDED: Health check server for Replit + UptimeRobot
+const express = require('express');
+const healthApp = express();
+const HEALTH_PORT = process.env.PORT || 3000;
+
+healthApp.get('/', (req, res) => res.send('🤖¢əρяιѕυη WhatsApp Bot is running fine!'));
+healthApp.listen(HEALTH_PORT, () => console.log(`✅ Health check server started on port ${HEALTH_PORT}`));
+
 // Define admin and owner commands
 const ADMIN_COMMANDS = new Set([
     'admin', 'groupinfo', 'grouplink', 'kick', 'promote', 'demote', 'add', 'close', 'open',
@@ -238,7 +246,7 @@ process.on('unhandledRejection', (reason) => {
     }
 });
 
-// Keep the WhatsApp bot alive on Render
+// ✅ KEPT: Your existing web server (now runs alongside health check)
 const express = require('express');
 const app = express();
 
