@@ -6,3 +6,18 @@ expertMode = true
 channel = "stable-25_05"
 
 run = "npm start"
+
+[workflows]
+
+[[workflows.workflow]]
+name = "Run app"
+mode = "sequential"
+author = 48331763
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm start"
+
+[[ports]]
+localPort = 3000
+externalPort = 80

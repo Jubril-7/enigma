@@ -2,6 +2,9 @@
 process.on('unhandledRejection', () => {});
 process.on('uncaughtException', () => {});
 
+// ✅ FIX: Add crypto polyfill for Replit
+globalThis.crypto = require('crypto').webcrypto;
+
 const P = require('pino');
 const axios = require('axios');
 const fs = require('fs').promises;
@@ -18,13 +21,15 @@ const hangmanCommands = require('./commands/games/hangman');
 const tictactoeCommands = require('./commands/games/tictactoe');
 const wordgameCommands = require('./commands/games/wordgame');
 
-// ✅ ADDED: Health check server for Replit + UptimeRobot
+// ✅ SINGLE Express app for Replit
 const express = require('express');
-const healthApp = express();
-const HEALTH_PORT = process.env.PORT || 3000;
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-healthApp.get('/', (req, res) => res.send('🤖¢əρяιѕυη WhatsApp Bot is running fine!'));
-healthApp.listen(HEALTH_PORT, () => console.log(`✅ Health check server started on port ${HEALTH_PORT}`));
+// Health check endpoint for UptimeRobot
+app.get('/', (req, res) => res.send('🤖¢əρяιѕυη WhatsApp Bot is running fine!'));
+
+app.listen(PORT, () => console.log(`✅ Health check server started on port ${PORT}`));
 
 // Define admin and owner commands
 const ADMIN_COMMANDS = new Set([
@@ -73,7 +78,7 @@ async function connectToWhatsApp() {
             const isGroup = chatId.endsWith('@g.us');
             const sender = msg.key.fromMe ? sock.user.id : (msg.key.participant || msg.key.remoteJid);
             const fromMe = msg.key.fromMe;
-            
+
             await logMessage('debug', `Received message in ${chatId}, sender: ${sender}, fromMe: ${fromMe}, participant: ${msg.key.participant || 'none'}`);
 
             const storage = await loadStorage();
@@ -229,7 +234,8 @@ async function handleAntilink(sock, msg, chatId, sender, storage) {
 
 connectToWhatsApp().catch(console.error);
 
-// ✅ Global error handlers — prevent crashes on Render
+// ✅ REMOVED: Duplicate Express server at the bottom
+// ✅ KEPT: Global error handlers
 process.on('uncaughtException', (err) => {
     if (String(err).includes('Bad MAC') || String(err).includes('decrypt')) {
         console.warn('⚠️ Ignored uncaught decrypt error');
@@ -245,12 +251,3 @@ process.on('unhandledRejection', (reason) => {
         console.error('❌ Unhandled Rejection:', reason);
     }
 });
-
-// ✅ KEPT: Your existing web server (now runs alongside health check)
-const express = require('express');
-const app = express();
-
-app.get('/', (req, res) => res.send('🤖¢əρяιѕυη WhatsApp Bot is running fine!'));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Web server started on port ${PORT}`));
