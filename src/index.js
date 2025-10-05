@@ -230,3 +230,12 @@ async function handleAntilink(sock, msg, chatId, sender, storage) {
 }
 
 connectToWhatsApp().catch(console.error);
+
+// Keep the WhatsApp bot alive on Render
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => res.send('🤖¢əρяιѕυη WhatsApp Bot is running fine!'));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`✅ Web server started on port ${PORT}`));
