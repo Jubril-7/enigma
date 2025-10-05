@@ -51,128 +51,114 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // ✅ Safe message listener (ignores Bad MAC errors)
     sock.ev.on('messages.upsert', async ({ messages }) => {
-        const msg = messages[0];
-        if (!msg.message) return;
-
-        const chatId = msg.key.remoteJid;
-        const isGroup = chatId.endsWith('@g.us');
-        const sender = msg.key.fromMe ? sock.user.id : (msg.key.participant || msg.key.remoteJid);
-        const fromMe = msg.key.fromMe;
-        
-        await logMessage('debug', `Received message in ${chatId}, sender: ${sender}, fromMe: ${fromMe}, participant: ${msg.key.participant || 'none'}`);
-
-        const storage = await loadStorage();
-        let prefix = storage.prefix || config.prefix;
-
         try {
-            const approved = await isGroupApproved(chatId, storage);
-            if (isGroup && !approved) {
-                if (msg.message.conversation?.startsWith(`${prefix}alive`)) {
-                    await logMessage('info', `Unapproved group detected: ${chatId}, Control group: ${config.controlGroupId}`);
-                    await handleUnapprovedGroup(sock, msg, chatId, storage);
-                    return;
-                }
-                await logMessage('info', `Ignoring message in unapproved group: ${chatId}`);
-                return;
-            }
+            const msg = messages[0];
+            if (!msg.message) return;
 
-            const role = await getRole(sock, sender, chatId, storage);
-            if (role === 'banned' && !fromMe) {
-                try {
-                    // No reaction or response for banned users
-                    await logMessage('info', `Ignored message from banned user ${sender} in ${chatId}`);
-                } catch (error) {
-                    await logMessage('error', `Failed to log banned user message: ${error.message}`);
-                }
-                return;
-            }
+            const chatId = msg.key.remoteJid;
+            const isGroup = chatId.endsWith('@g.us');
+            const sender = msg.key.fromMe ? sock.user.id : (msg.key.participant || msg.key.remoteJid);
+            const fromMe = msg.key.fromMe;
+            
+            await logMessage('debug', `Received message in ${chatId}, sender: ${sender}, fromMe: ${fromMe}, participant: ${msg.key.participant || 'none'}`);
 
-            const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-            if (!text.startsWith(prefix)) {
-                if (isGroup && storage.groups[chatId]?.antilink === 'on') {
-                    if (text.includes('http://') || text.includes('https://')) {
-                        await handleAntilink(sock, msg, chatId, sender, storage);
-                    }
-                }
-                return;
-            }
-
-            const [command, ...args] = text.slice(prefix.length).trim().split(/\s+/);
-            const commandLower = command.toLowerCase();
-
-            await logMessage('debug', `Processing command: ${commandLower}, role: ${role}, args: ${args.join(' ')}`);
+            const storage = await loadStorage();
+            let prefix = storage.prefix || config.prefix;
 
             try {
-                let handled = false;
+                const approved = await isGroupApproved(chatId, storage);
+                if (isGroup && !approved) {
+                    if (msg.message.conversation?.startsWith(`${prefix}alive`)) {
+                        await logMessage('info', `Unapproved group detected: ${chatId}, Control group: ${config.controlGroupId}`);
+                        await handleUnapprovedGroup(sock, msg, chatId, storage);
+                        return;
+                    }
+                    await logMessage('info', `Ignoring message in unapproved group: ${chatId}`);
+                    return;
+                }
 
-                // Check permissions first
-                if (OWNER_COMMANDS.has(commandLower) && role !== 'owner') {
+                const role = await getRole(sock, sender, chatId, storage);
+                if (role === 'banned' && !fromMe) {
+                    try {
+                        await logMessage('info', `Ignored message from banned user ${sender} in ${chatId}`);
+                    } catch (error) {
+                        await logMessage('error', `Failed to log banned user message: ${error.message}`);
+                    }
+                    return;
+                }
+
+                const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+                if (!text.startsWith(prefix)) {
+                    if (isGroup && storage.groups[chatId]?.antilink === 'on') {
+                        if (text.includes('http://') || text.includes('https://')) {
+                            await handleAntilink(sock, msg, chatId, sender, storage);
+                        }
+                    }
+                    return;
+                }
+
+                const [command, ...args] = text.slice(prefix.length).trim().split(/\s+/);
+                const commandLower = command.toLowerCase();
+
+                await logMessage('debug', `Processing command: ${commandLower}, role: ${role}, args: ${args.join(' ')}`);
+
+                try {
+                    let handled = false;
+
+                    if (OWNER_COMMANDS.has(commandLower) && role !== 'owner') {
+                        await sendReaction(sock, msg, '❌');
+                        await sock.sendMessage(chatId, { text: '❌ This command is for bot owners only.' });
+                        await logMessage('info', `Owner command ${commandLower} attempted by non-owner ${sender}`);
+                        return;
+                    }
+
+                    if (ADMIN_COMMANDS.has(commandLower) && role !== 'admin' && role !== 'owner') {
+                        await sendReaction(sock, msg, '❌');
+                        await sock.sendMessage(chatId, { text: '❌ This command is for group admins only.' });
+                        await logMessage('info', `Admin command ${commandLower} attempted by non-admin ${sender}`);
+                        return;
+                    }
+
+                    handled = await systemCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
+                    if (handled) return;
+
+                    handled = await adminCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
+                    if (handled) return;
+
+                    handled = await mediaCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
+                    if (handled) return;
+
+                    handled = await hangmanCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
+                    if (handled) return;
+
+                    handled = await tictactoeCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
+                    if (handled) return;
+
+                    handled = await wordgameCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
+                    if (handled) return;
+
+                    if (!handled) {
+                        await sendReaction(sock, msg, '❌');
+                        await sock.sendMessage(chatId, { text: `Unknown command: ${command}. Type ${prefix}help for available commands.` });
+                    }
+                } catch (error) {
+                    console.error(error);
                     await sendReaction(sock, msg, '❌');
-                    await sock.sendMessage(chatId, { text: '❌ This command is for bot owners only.' });
-                    await logMessage('info', `Owner command ${commandLower} attempted by non-owner ${sender}`);
-                    return;
-                }
-
-                if (ADMIN_COMMANDS.has(commandLower) && role !== 'admin' && role !== 'owner') {
-                    await sendReaction(sock, msg, '❌');
-                    await sock.sendMessage(chatId, { text: '❌ This command is for group admins only.' });
-                    await logMessage('info', `Admin command ${commandLower} attempted by non-admin ${sender}`);
-                    return;
-                }
-
-                // System Commands
-                handled = await systemCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
-                if (handled) {
-                    await logMessage('debug', `System command ${commandLower} handled successfully`);
-                    return;
-                }
-
-                // Admin Commands
-                handled = await adminCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
-                if (handled) {
-                    await logMessage('debug', `Admin command ${commandLower} handled successfully`);
-                    return;
-                }
-
-                // Media Commands
-                handled = await mediaCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
-                if (handled) {
-                    await logMessage('debug', `Media command ${commandLower} handled successfully`);
-                    return;
-                }
-
-                // Game Commands
-                handled = await hangmanCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
-                if (handled) {
-                    await logMessage('debug', `Hangman command ${commandLower} handled successfully`);
-                    return;
-                }
-                handled = await tictactoeCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
-                if (handled) {
-                    await logMessage('debug', `Tic-tac-toe command ${commandLower} handled successfully`);
-                    return;
-                }
-                handled = await wordgameCommands(sock, msg, commandLower, args, storage, sender, chatId, role, prefix);
-                if (handled) {
-                    await logMessage('debug', `Wordgame command ${commandLower} handled successfully`);
-                    return;
-                }
-
-                if (!handled) {
-                    await logMessage('info', `Unknown command: ${commandLower}`);
-                    await sendReaction(sock, msg, '❌');
-                    await sock.sendMessage(chatId, { text: `Unknown command: ${command}. Type ${prefix}help for available commands.` });
+                    await sock.sendMessage(chatId, { text: 'An error occurred. Please try again.' });
+                    await logMessage('error', `Error processing command ${commandLower}: ${error.message}`);
                 }
             } catch (error) {
                 console.error(error);
-                await sendReaction(sock, msg, '❌');
-                await sock.sendMessage(chatId, { text: 'An error occurred. Please try again.' });
-                await logMessage('error', `Error processing command ${commandLower}: ${error.message}`);
+                await logMessage('error', `Error in message handling for ${chatId}: ${error.message}`);
             }
-        } catch (error) {
-            console.error(error);
-            await logMessage('error', `Error in message handling for ${chatId}: ${error.message}`);
+        } catch (err) {
+            if (String(err).includes('Bad MAC') || String(err).includes('decrypt')) {
+                console.warn('⚠️ Ignored Bad MAC/decrypt error');
+            } else {
+                console.error('❌ messages.upsert error:', err);
+            }
         }
     });
 
@@ -230,6 +216,23 @@ async function handleAntilink(sock, msg, chatId, sender, storage) {
 }
 
 connectToWhatsApp().catch(console.error);
+
+// ✅ Global error handlers — prevent crashes on Render
+process.on('uncaughtException', (err) => {
+    if (String(err).includes('Bad MAC') || String(err).includes('decrypt')) {
+        console.warn('⚠️ Ignored uncaught decrypt error');
+    } else {
+        console.error('❌ Uncaught Exception:', err);
+    }
+});
+
+process.on('unhandledRejection', (reason) => {
+    if (String(reason).includes('Bad MAC') || String(reason).includes('decrypt')) {
+        console.warn('⚠️ Ignored unhandled decrypt rejection');
+    } else {
+        console.error('❌ Unhandled Rejection:', reason);
+    }
+});
 
 // Keep the WhatsApp bot alive on Render
 const express = require('express');
