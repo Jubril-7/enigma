@@ -38,12 +38,11 @@ async function connectToWhatsApp() {
             console.log('QR Code:', qr);
         }
         if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            if (reason === DisconnectReason.loggedOut) {
-                console.log('Session logged out. Delete auth_info folder and rescan QR.');
+            if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+                await connectToWhatsApp();
             } else {
-                console.log('Connection closed. Not reconnecting automatically (Render mode).');
-        }
+                console.log('Connection closed. Please delete auth_info folder and rescan QR.');
+            }
         } else if (connection === 'open') {
             console.log('Connected to WhatsApp');
             await logMessage('info', 'Connected to WhatsApp');
