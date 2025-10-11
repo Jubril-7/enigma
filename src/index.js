@@ -1,7 +1,3 @@
-// NUCLEAR OPTION - IGNORE ALL ERRORS TO KEEP BOT RUNNING
-process.on('unhandledRejection', () => {});
-process.on('uncaughtException', () => {});
-
 // ✅ FIX: Add crypto polyfill for Replit
 globalThis.crypto = require('crypto').webcrypto;
 
@@ -30,6 +26,23 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('🤖¢əρяιѕυη WhatsApp Bot is running fine!'));
 
 app.listen(PORT, () => console.log(`✅ Health check server started on port ${PORT}`));
+
+// Helper function to handle warning-based kicking
+async function handleWarningKick(sock, chatId, sender, storage) {
+    try {
+        const role = await getRole(sock, sender, chatId, storage);
+        if (role !== 'owner') {
+            await sock.groupParticipantsUpdate(chatId, [sender], 'remove');
+            await sock.sendMessage(chatId, { text: `@${sender.split('@')[0]} has been kicked for reaching 3 warnings.`, mentions: [sender] });
+            await logMessage('info', `User ${sender} kicked from ${chatId} for reaching 3 warnings`);
+        }
+        // Reset warnings after kicking (or if owner, don't kick but reset warnings)
+        delete storage.warnings[sender];
+        await saveStorage(storage);
+    } catch (error) {
+        await logMessage('error', `Failed to kick ${sender} for warnings: ${error.message}`);
+    }
+}
 
 // Define admin and owner commands
 const ADMIN_COMMANDS = new Set([
@@ -218,17 +231,9 @@ async function handleAntilink(sock, msg, chatId, sender, storage) {
         await logMessage('error', `Failed to handle antilink for ${sender}: ${error.message}`);
     }
 
-    if (warnings + 1 >= 3) {
-        if (!(await getRole(sock, sender, chatId, storage) === 'owner')) {
-            try {
-                await sock.groupParticipantsUpdate(chatId, [sender], 'remove');
-                await sock.sendMessage(chatId, { text: `@${sender.split('@')[0]} has been kicked for too many warnings.`, mentions: [sender] });
-            } catch (error) {
-                await logMessage('error', `Failed to kick ${sender}: ${error.message}`);
-            }
-            delete storage.warnings[sender];
-            await saveStorage(storage);
-        }
+    // Check if warnings reached 3 and kick immediately
+    if (storage.warnings[sender] >= 3) {
+        await handleWarningKick(sock, chatId, sender, storage);
     }
 }
 

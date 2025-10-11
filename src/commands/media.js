@@ -5,6 +5,55 @@ const sharp = require('sharp');
 module.exports = async (sock, msg, command, args, storage, sender, chatId, role, senderDisplay) => {
     let quotedMsg = null; // Declare quotedMsg once at the top
 
+    // Helper function to resize and crop image to 512x512 for WhatsApp stickers
+    const resizeToStickerSize = async (buffer) => {
+        try {
+            const image = sharp(buffer);
+            const metadata = await image.metadata();
+
+            // Calculate resize dimensions to fit within 512x512 while maintaining aspect ratio
+            const { width, height } = metadata;
+            const targetSize = 512;
+
+            if (width === height) {
+                // Square image - simple resize
+                return await image
+                    .resize(targetSize, targetSize)
+                    .webp({ quality: 80, effort: 6 })
+                    .toBuffer();
+            } else {
+                // Non-square image - resize and center crop to 512x512
+                return await image
+                    .resize(targetSize, targetSize, {
+                        fit: 'cover',
+                        position: 'center'
+                    })
+                    .webp({ quality: 80, effort: 6 })
+                    .toBuffer();
+            }
+        } catch (error) {
+            await logMessage('error', `Error resizing image: ${error.message}`);
+            throw error;
+        }
+    };
+
+    // Helper function to process video frames for animated stickers
+    const processVideoForSticker = async (buffer) => {
+        try {
+            // For videos, we'll take the first frame and resize it to 512x512
+            return await sharp(buffer, { animated: true })
+                .resize(512, 512, {
+                    fit: 'cover',
+                    position: 'center'
+                })
+                .webp({ quality: 80, effort: 6 })
+                .toBuffer();
+        } catch (error) {
+            await logMessage('error', `Error processing video for sticker: ${error.message}`);
+            throw error;
+        }
+    };
+
     // Helper function to create and send a sticker
     const createSticker = async (msg, chatId, quotedMsg, sender, senderDisplay) => {
         let imageMsg = msg.message?.imageMessage;
@@ -30,7 +79,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
 
             // Log message structure for debugging
             await logMessage('debug', `Sticker command in ${chatId}: imageMsg=${!!imageMsg}, videoMsg=${!!videoMsg}, isQuoted=${!!quotedMsg}, quotedMsg=${JSON.stringify(quotedMsg, null, 2)}`);
-            
+
             // Select the correct message object
             const isQuoted = !!quotedMsg && (quotedMsg.imageMessage || quotedMsg.videoMessage);
             const mediaMsg = isQuoted ? { 
@@ -41,7 +90,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                 }, 
                 message: quotedMsg 
             } : msg;
-            
+
             // await logMessage('debug', `MediaMsg for sticker: ${JSON.stringify(mediaMsg, null, 2)}`);
 
             const buffer = await downloadMediaMessage(mediaMsg, 'buffer', {}, { 
@@ -53,11 +102,15 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
 
             await logMessage('debug', `Downloaded buffer size: ${buffer.length} bytes`);
 
-            // Convert buffer to WebP with sticker requirements (512x512, <100KB)
-            const webpBuffer = await sharp(buffer)
-                .resize({ width: 512, height: 512, fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                .webp({ quality: 80, effort: 6 })
-                .toBuffer();
+            // Convert buffer to WebP with WhatsApp sticker requirements (512x512)
+            let webpBuffer;
+            if (videoMsg) {
+                // For videos, process as animated sticker (first frame)
+                webpBuffer = await processVideoForSticker(buffer);
+            } else {
+                // For images, resize to exact 512x512
+                webpBuffer = await resizeToStickerSize(buffer);
+            }
 
             await logMessage('debug', `WebP buffer size: ${webpBuffer.length} bytes`);
 
@@ -130,9 +183,12 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
 
                 await logMessage('debug', `Downloaded buffer size: ${buffer.length} bytes`);
 
-                // Convert WebP to JPEG for better compatibility
+                // Convert WebP to JPEG and resize to 512x512 for consistency
                 const jpegBuffer = await sharp(buffer)
-                    .resize({ width: 512, height: 512, fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
+                    .resize(512, 512, {
+                        fit: 'cover',
+                        position: 'center'
+                    })
                     .jpeg({ quality: 80 })
                     .toBuffer();
 
@@ -141,7 +197,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                 const sendResult = await sock.sendMessage(chatId, { 
                     image: jpegBuffer,
                     mimetype: 'image/jpeg',
-                    caption: 'Converted sticker to image'
+                    caption: 'Converted sticker to image (512x512)'
                 });
                 // await logMessage('debug', `Image send result: ${JSON.stringify(sendResult, null, 2)}`);
 

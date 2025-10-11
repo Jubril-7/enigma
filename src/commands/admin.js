@@ -2,6 +2,7 @@ const { formatJID } = require('../utils/helpers');
 const { sendReaction } = require('../middlewares/reactions');
 const { logMessage } = require('../utils/logger');
 const { loadStorage, saveStorage } = require('../utils/storage');
+const { getRole } = require('../middlewares/roles');
 
 module.exports = async (sock, msg, command, args, storage, sender, chatId, role, prefix) => {
     try {
@@ -84,7 +85,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'kick') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -98,7 +99,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to kick.' });
                     return true;
                 }
-                
+
                 await sock.groupParticipantsUpdate(chatId, [user], 'remove');
                 await sendReaction(sock, msg, '✅');
                 await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has been kicked.`, mentions: [user] });
@@ -115,7 +116,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'promote') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -129,7 +130,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to promote.' });
                     return true;
                 }
-                
+
                 await sock.groupParticipantsUpdate(chatId, [user], 'promote');
                 await sendReaction(sock, msg, '✅');
                 await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has been promoted to admin.`, mentions: [user] });
@@ -146,7 +147,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'demote') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -160,7 +161,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to demote.' });
                     return true;
                 }
-                
+
                 await sock.groupParticipantsUpdate(chatId, [user], 'demote');
                 await sendReaction(sock, msg, '✅');
                 await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has been demoted from admin.`, mentions: [user] });
@@ -177,7 +178,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'ban') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -191,7 +192,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to ban.' });
                     return true;
                 }
-                
+
                 storage.bans[user] = true;
                 await saveStorage(storage);
                 await sendReaction(sock, msg, '✅');
@@ -330,7 +331,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'warn') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -344,12 +345,28 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to warn.' });
                     return true;
                 }
-                
+
                 storage.warnings[user] = (storage.warnings[user] || 0) + 1;
                 await saveStorage(storage);
+
+                const warningsCount = storage.warnings[user];
                 await sendReaction(sock, msg, '✅');
-                await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has been warned. Total warnings: ${storage.warnings[user]}.`, mentions: [user] });
-                await logMessage('info', `Warn command executed: Warned ${user} in ${chatId}, total warnings: ${storage.warnings[user]}`);
+                await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has been warned. Total warnings: ${warningsCount}/3.`, mentions: [user] });
+                await logMessage('info', `Warn command executed: Warned ${user} in ${chatId}, total warnings: ${warningsCount}`);
+
+                // Check if warnings reached 3 and kick immediately
+                if (warningsCount >= 3) {
+                    const role = await getRole(sock, user, chatId, storage);
+                    if (role !== 'owner') {
+                        await sock.groupParticipantsUpdate(chatId, [user], 'remove');
+                        await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has been kicked for reaching 3 warnings.`, mentions: [user] });
+                        await logMessage('info', `User ${user} kicked from ${chatId} for reaching 3 warnings via warn command`);
+                    }
+                    // Reset warnings after kicking (or if owner, don't kick but reset warnings)
+                    delete storage.warnings[user];
+                    await saveStorage(storage);
+                }
+
                 return true;
             } catch (error) {
                 await logMessage('error', `Error in warn command: ${error.message}`);
@@ -362,7 +379,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'warnings') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -376,7 +393,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to check warnings.' });
                     return true;
                 }
-                
+
                 const warnings = storage.warnings[user] || 0;
                 await sendReaction(sock, msg, '✅');
                 await sock.sendMessage(chatId, { text: `@${user.split('@')[0]} has ${warnings} warnings.`, mentions: [user] });
@@ -393,7 +410,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
         if (command === 'clearwarn') {
             try {
                 let user;
-                
+
                 // Check if user is mentioned
                 if (msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.length) {
                     user = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
@@ -407,7 +424,7 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
                     await sock.sendMessage(chatId, { text: 'Please tag a user or reply to their message to clear warnings.' });
                     return true;
                 }
-                
+
                 delete storage.warnings[user];
                 await saveStorage(storage);
                 await sendReaction(sock, msg, '✅');
