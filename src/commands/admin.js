@@ -529,17 +529,55 @@ module.exports = async (sock, msg, command, args, storage, sender, chatId, role,
 
         if (command === 'tag') {
             try {
-                if (args.length === 0) {
-                    await sendReaction(sock, msg, '❌');
-                    await sock.sendMessage(chatId, { text: 'Please provide a message to tag all members.' });
-                    return true;
-                }
                 const groupMeta = await sock.groupMetadata(chatId);
                 const members = groupMeta.participants.map(p => p.id);
-                const message = args.join(' ');
-                await sendReaction(sock, msg, '✅');
-                await sock.sendMessage(chatId, { text: message, mentions: members });
-                await logMessage('info', `Tag command executed: Tagged all members in ${chatId} with message "${message}"`);
+
+                let message;
+
+                // Check if command is replying to a message
+                if (msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
+                    const quotedMsg = msg.message.extendedTextMessage.contextInfo;
+                    // Get text from quoted message
+                    const quotedText = quotedMsg.quotedMessage.conversation || 
+                                     quotedMsg.quotedMessage.extendedTextMessage?.text || 
+                                     '[Media Message]';
+                    message = `${quotedText}\n\n${args.join(' ')}`;
+
+                    await sendReaction(sock, msg, '✅');
+                    await sock.sendMessage(chatId, { 
+                        text: message, 
+                        mentions: members,
+                        contextInfo: {
+                            mentionedJid: members,
+                            stanzaId: quotedMsg.stanzaId,
+                            participant: quotedMsg.participant,
+                            remoteJid: chatId,
+                            quotedMessage: quotedMsg.quotedMessage
+                        }
+                    });
+                } else {
+                    // Regular tag command
+                    if (args.length === 0) {
+                        await sendReaction(sock, msg, '❌');
+                        await sock.sendMessage(chatId, { text: 'Please provide a message to tag all members.' });
+                        return true;
+                    }
+                    message = args.join(' ');
+
+                    await sendReaction(sock, msg, '✅');
+                    await sock.sendMessage(chatId, { 
+                        text: message, 
+                        mentions: members,
+                        contextInfo: {
+                            mentionedJid: members,
+                            participant: sender,
+                            stanzaId: msg.key.id,
+                            remoteJid: chatId
+                        }
+                    });
+                }
+
+                await logMessage('info', `Tag command executed: Tagged all members in ${chatId} with message "${message}" by ${sender}`);
                 return true;
             } catch (error) {
                 await logMessage('error', `Error in tag command: ${error.message}`);
